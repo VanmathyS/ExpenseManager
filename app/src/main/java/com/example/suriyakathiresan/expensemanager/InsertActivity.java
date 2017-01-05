@@ -18,6 +18,7 @@ import android.widget.Toast;
 
 public class InsertActivity extends AppCompatActivity {
     Intent i;
+    Button b;
     //String index;
     EditText e1;
     String hint,fortoast,todisplay;
