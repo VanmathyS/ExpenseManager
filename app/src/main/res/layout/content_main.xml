@@ -87,6 +87,7 @@
             android:layout_marginTop="360dp"
             android:layout_marginLeft="50dp"
             android:scaleType="fitXY"
+            android:onClick="Capture"
             android:src="@drawable/snapshot"
             android:focusableInTouchMode="true"
             android:background="@android:drawable/alert_dark_frame"

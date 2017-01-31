@@ -30,6 +30,13 @@ ImageButton i1,i2,i3,i4,i5,i6;
                 startActivity(i);
             }
         });
+        i6.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v){
+                Intent i=new Intent(MainActivity.this,CameraActivity.class);
+                startActivity(i);
+            }
+        });
     }
 
     @Override
@@ -53,4 +60,5 @@ ImageButton i1,i2,i3,i4,i5,i6;
 
         return super.onOptionsItemSelected(item);
     }
+
 }

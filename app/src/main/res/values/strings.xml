@@ -5,4 +5,6 @@
     <string name="title_activity_income">IncomeActivity</string>
     <string name="title_activity_insert">InsertActivity</string>
     <string name="title_activity_edit">EditActivity</string>
+    <string name="activity_camera">CameraActivity</string>
+
 </resources>
