@@ -16,9 +16,12 @@
 
 package com.benoitletondor.easybudgetapp.view;
 
+import android.app.DatePickerDialog;
 import android.app.Dialog;
 import android.app.ProgressDialog;
+import android.app.TimePickerDialog;
 import android.content.BroadcastReceiver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -27,6 +30,8 @@ import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.CoordinatorLayout;
@@ -34,10 +39,13 @@ import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.content.FileProvider;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.text.format.DateFormat;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -46,10 +54,12 @@ import android.view.WindowManager;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.widget.Button;
+import android.widget.DatePicker;
 import android.widget.EditText;
 import android.widget.GridView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.TimePicker;
 
 import com.benoitletondor.easybudgetapp.EasyBudget;
 import com.benoitletondor.easybudgetapp.R;
@@ -63,6 +73,7 @@ import com.benoitletondor.easybudgetapp.model.Expense;
 import com.benoitletondor.easybudgetapp.model.MonthlyExpense;
 import com.benoitletondor.easybudgetapp.model.MonthlyExpenseDeleteType;
 import com.benoitletondor.easybudgetapp.model.db.DBCache;
+import com.benoitletondor.easybudgetapp.reminder.ReminderManager;
 import com.benoitletondor.easybudgetapp.view.main.calendar.CalendarFragment;
 import com.benoitletondor.easybudgetapp.view.main.ExpensesRecyclerViewAdapter;
 import com.benoitletondor.easybudgetapp.view.selectcurrency.SelectCurrencyFragment;
@@ -72,12 +83,16 @@ import com.google.android.gms.appinvite.AppInviteReferral;
 import com.roomorama.caldroid.CaldroidFragment;
 import com.roomorama.caldroid.CaldroidListener;
 
+import java.io.File;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+
+import static com.benoitletondor.easybudgetapp.R.string.date;
 
 /**
  * Main activity containing Calendar and List of expenses
@@ -124,11 +139,15 @@ public class MainActivity extends DBActivity
     @Nullable
     private Date lastStopDate;
 
+    private Date date = new Date();
+
 // ------------------------------------------>
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
+
+        mCalendar = Calendar.getInstance();
         // Launch welcome screen if needed
         if( Parameters.getInstance(this).getInt(ParameterKeys.ONBOARDING_STEP, -1) != WelcomeActivity.STEP_COMPLETED )
         {
@@ -361,6 +380,22 @@ public class MainActivity extends DBActivity
             else if( resultCode == RESULT_CANCELED )
             {
                 finish(); // Finish activity if welcome screen is finish via back button
+            }
+        }
+        else if (requestCode == REQUEST_TAKE_PHOTO && resultCode == RESULT_OK) {
+            Log.d("Demo Pic", "Picture is saved." + newfile != null? newfile.getAbsolutePath():"");
+
+            if(newfile != null)
+            {
+
+                addImageToGallery( newfile.getAbsolutePath(), MainActivity.this);
+
+                Intent intent = new Intent();
+                intent.setAction(Intent.ACTION_VIEW);
+                intent.setDataAndType(Uri.fromFile(newfile), "image/*");
+                startActivity(intent);
+
+
             }
         }
     }
@@ -661,10 +696,156 @@ public class MainActivity extends DBActivity
 
             return true;
         }
+    else if( id == R.id.action_report )
+    {
+        Intent startIntent = new Intent(this, MyTable.class);
+        ActivityCompat.startActivity(MainActivity.this, startIntent, null);
 
+        return true;
+    }
+    else if(id == R.id.action_bill_capture)
+    {
+        capturarFoto();
+
+        return true;
+    }
+    else if(id == R.id.action_bills)
+    {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        Uri uri = Uri.parse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).getPath() + "/ExpenseManager/");
+        intent.setDataAndType(uri, "*/*");
+        startActivity(Intent.createChooser(intent, "Open folder"));
+
+        return true;
+    }
+    else if( id == R.id.action_schedule )
+    {
+        final double currentBalance = -db.getBalanceForDay(new Date());
+
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_schedule_expense, null);
+        final EditText amountEditText = (EditText) dialogView.findViewById(R.id.desc);
+        //amountEditText.setText(currentBalance == 0 ? "0" : CurrencyHelper.getFormattedAmountValue(currentBalance));
+        UIHelper.preventUnsupportedInputForDecimals(amountEditText);
+        amountEditText.setSelection(amountEditText.getText().length()); // Put focus at the end of the text
+
+        final Button dateButton = (Button) dialogView.findViewById(R.id.date_button);
+        UIHelper.removeButtonBorder(dateButton); // Remove border on lollipop
+
+        updateDateButtonDisplay(dateButton);
+
+        dateButton.setOnClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View v)
+            {
+                DatePickerDialogFragment fragment = new DatePickerDialogFragment(date, new DatePickerDialog.OnDateSetListener()
+                {
+                    @Override
+                    public void onDateSet(DatePicker view, int year, int monthOfYear, int dayOfMonth)
+                    {
+                        //Calendar cal = Calendar.getInstance();
+
+                        mCalendar.set(Calendar.YEAR, year);
+                        mCalendar.set(Calendar.MONTH, monthOfYear);
+                        mCalendar.set(Calendar.DAY_OF_MONTH, dayOfMonth);
+
+                        date = mCalendar.getTime();
+                        updateDateButtonDisplay(dateButton);
+                    }
+                });
+
+                fragment.show(getSupportFragmentManager(), "datePicker");
+            }
+        });
+
+        final Button timeButton = (Button) dialogView.findViewById(R.id.time_button);
+        UIHelper.removeButtonBorder(timeButton); // Remove border on lollipop
+
+        updateTimeButtonText(timeButton);
+
+        timeButton.setOnClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View v)
+            {
+                showTimePicker(timeButton).show();
+            }
+        });
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.adjust_balance_title);
+        builder.setMessage(R.string.adjust_balance_message);
+        builder.setView(dialogView);
+        builder.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener()
+        {
+            @Override
+            public void onClick(DialogInterface dialog, int which)
+            {
+                dialog.dismiss();
+            }
+        });
+        builder.setPositiveButton(R.string.ok, new DialogInterface.OnClickListener()
+        {
+            @Override
+            public void onClick(DialogInterface dialog, int which)
+            {
+
+                new ReminderManager(MainActivity.this).setReminder(amountEditText.getText().toString(), mCalendar);
+
+            }
+        });
+
+        final Dialog dialog = builder.show();
+
+        /*// Directly show keyboard when the dialog pops
+        amountEditText.setOnFocusChangeListener(new View.OnFocusChangeListener()
+        {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus)
+            {
+                if (hasFocus && getResources().getConfiguration().keyboard == Configuration.KEYBOARD_NOKEYS ) // Check if the device doesn't have a physical keyboard
+                {
+                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                }
+            }
+        });*/
+
+        return true;
+    }
         return super.onOptionsItemSelected(item);
     }
 
+    private void updateDateButtonDisplay(Button dateButton)
+    {
+        SimpleDateFormat formatter = new SimpleDateFormat("dd-MM-yyyy", Locale.getDefault());
+        dateButton.setText(formatter.format(date));
+    }
+
+    private TimePickerDialog showTimePicker(final Button button) {
+
+        TimePickerDialog timePicker = new TimePickerDialog(this, new TimePickerDialog.OnTimeSetListener() {
+
+            @Override
+            public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
+                mCalendar.set(Calendar.HOUR_OF_DAY, hourOfDay);
+                mCalendar.set(Calendar.MINUTE, minute);
+                updateTimeButtonText(button);
+            }
+        }, mCalendar.get(Calendar.HOUR_OF_DAY), mCalendar.get(Calendar.MINUTE), false);
+
+        return timePicker;
+    }
+
+    private static final String TIME_FORMAT = "hh:mm a";
+    public static final String DATE_TIME_FORMAT = "yyyy-MM-dd kk:mm:ss";
+    private Calendar mCalendar;
+
+    private void updateTimeButtonText(Button mTimeButton) {
+        // Set the time button text based upon the value from the database
+        SimpleDateFormat timeFormat = new SimpleDateFormat(TIME_FORMAT);
+        String timeForButton = timeFormat.format(mCalendar.getTime());
+        mTimeButton.setText(timeForButton);
+    }
 // ------------------------------------------>
 
     /**
@@ -1349,5 +1530,97 @@ public class MainActivity extends DBActivity
                     .show();
             }
         }
+    }
+
+    //Capture intent
+    String mCurrentPhotoPath;
+
+    private File createImageFile() throws IOException {
+        // Create an image file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefix */
+                ".jpg",         /* suffix */
+                storageDir      /* directory */
+        );
+
+        // Save a file: path for use with ACTION_VIEW intents
+        mCurrentPhotoPath = image.getAbsolutePath();
+        return image;
+    }
+
+    static final int REQUEST_TAKE_PHOTO = 1;
+
+    private void dispatchTakePictureIntent() {
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        // Ensure that there's a camera activity to handle the intent
+        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+            // Create the File where the photo should go
+            File photoFile = null;
+            try {
+                photoFile = createImageFile();
+            } catch (IOException ex) {
+                // Error occurred while creating the File
+            //...
+            }
+            // Continue only if the File was successfully created
+            if (photoFile != null) {
+                Uri photoURI = FileProvider.getUriForFile(this,
+                        "com.example.android.fileprovider",
+                        photoFile);
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
+                startActivityForResult(takePictureIntent, REQUEST_TAKE_PHOTO);
+            }
+        }
+    }
+
+
+
+    File newfile = null;
+
+    private void capturarFoto() {
+
+        final String dir =  Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)+ "/ExpenseManager/";
+        File newdir = new File(dir);
+        newdir.mkdirs();
+
+        String file = dir+ DateFormat.format("yyyy-MM-dd_hhmmss", new Date()).toString()+".jpg";
+
+
+        newfile = new File(file);
+        try {
+            newfile.createNewFile();
+        } catch (IOException e) {}
+
+        Uri outputFileUri = Uri.fromFile(newfile);
+
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, outputFileUri);
+
+        startActivityForResult(cameraIntent, REQUEST_TAKE_PHOTO);
+    }
+
+   /* @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQUEST_TAKE_PHOTO && resultCode == RESULT_OK) {
+            Log.d("Demo Pic", "Picture is saved");
+
+
+        }
+    }*/
+
+    public static void addImageToGallery(final String filePath, final Context context) {
+
+        ContentValues values = new ContentValues();
+
+        values.put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis());
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        values.put(MediaStore.MediaColumns.DATA, filePath);
+
+        context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
     }
 }
